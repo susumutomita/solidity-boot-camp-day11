@@ -26,15 +26,61 @@ interface IERC20 {
         address spender
     ) external view returns (uint256);
 
-    function approve(address spender, uint256 amount) external returns (bool);
+    // `approve`メソッドを修正して、許可額を更新する前に現在の許可額をゼロに設定する必要があることを強制する
+    function approve(
+        address spender,
+        uint256 amount
+    ) public virtual override returns (bool) {
+        require(
+            (amount == 0) || (allowance(_msgSender(), spender) == 0),
+            "ERC20: approve non-zero allowance without setting to zero first"
+        );
+        _approve(_msgSender(), spender, amount);
+        return true;
+    }
 
     function transferFrom(
         address sender,
         address recipient,
         uint256 amount
-    ) external returns (bool);
+    ) public virtual override returns (bool) {
+        uint256 currentAllowance = _allowances[sender][_msgSender()];
+        require(
+            currentAllowance >= amount,
+            "ERC20: transfer amount exceeds allowance"
+        );
 
-    event Transfer(address indexed from, address indexed to, uint256 value);
+        // 状態変更を先に行う
+        _balances[sender] = _balances[sender] - amount;
+        _balances[recipient] = _balances[recipient] + amount;
+        _approve(sender, _msgSender(), currentAllowance - amount);
+
+        // トークン移動のイベントをここで発行
+        emit Transfer(sender, recipient, amount);
+
+        return true;
+    }
+
+    mapping(address => bool) private _blacklist;
+
+    function addToBlacklist(address account) public onlyOwner {
+        _blacklist[account] = true;
+    }
+
+    function removeFromBlacklist(address account) public onlyOwner {
+        _blacklist[account] = false;
+    }
+
+    function _transfer(
+        address sender,
+        address recipient,
+        uint256 amount
+    ) internal virtual override {
+        require(
+            !_blacklist[sender] && !_blacklist[recipient],
+            "ERC20: sender or recipient is blacklisted"
+        );
+    }
 
     event Approval(
         address indexed owner,
@@ -68,9 +114,10 @@ interface IERC20Metadata is IERC20 {
     /**
      * @dev Returns the decimals places of the token.
      */
-    function decimals() external view returns (uint8);
-
-    
+    // `decimals`の値はそのままで、その他のコードで適切に処理します。
+    function decimals() public view virtual override returns (uint8) {
+        return 18; // または他の値
+    }
 }
 
 contract ERC20 is Context, IERC20, IERC20Metadata {
@@ -213,6 +260,14 @@ contract ERC20 is Context, IERC20, IERC20Metadata {
         _balances[recipient] += amount;
 
         emit Transfer(sender, recipient, amount);
+    }
+
+    function mint(address account, uint256 amount) public onlyOwner {
+        _mint(account, amount);
+    }
+
+    function burn(address account, uint256 amount) public onlyOwner {
+        _burn(account, amount);
     }
 
     function _mint(address account, uint256 amount) internal virtual {
